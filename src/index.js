@@ -3,6 +3,8 @@ const express = require('express');
 const http = require('http');
 const socketio = require('socket.io');
 const Filter = require('bad-words');
+const { generateMessage, generateLocationMessage } = require('../src/utils/message');
+const { getUser, getUsersInRoom, addUser, removeUser } = require('../public/js/users');
 
 
 const app = express();
@@ -16,26 +18,47 @@ app.use(express.static(publicDirPath));
 
 io.on('connection', (socket) => {
     console.log('New user connected');
-    socket.emit('message', 'Welcome!');
+    socket.on('join', ({username, room}, callback) => {
 
-    socket.broadcast.emit('message', 'A new user has joined!');
+        const {error, user} = addUser({id : socket.id, username, room});
+        if(error){
+            return callback(error);
+        }
 
-    const filter = new Filter();
+        socket.join(user.room);
+        socket.emit('message', generateMessage('Welcome!'));
+        socket.broadcast.to(user.room).emit('message', generateMessage(`${user.username} has joined!`));
+
+        callback();
+    })
+
+    
 
     socket.on('sendMessage', (message, callback) => {
+        const user = getUser(socket.id);
+
+        const filter = new Filter();
         message = filter.clean(message);
-        io.emit('message', message);
+
+        io.to(user.room).emit('message', generateMessage(user.username, message));
 
         callback();
     }); 
-
+    
     socket.on('shareLocation', (coords, callback) => {
-        io.emit('message', `https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`);
+        const user = getUser(socket.id);
+        
+        io.to(user.room).emit('locationMessage', generateLocationMessage(user.username, `https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`));
+
         callback();
     });
 
     socket.on('disconnect', () => {
-        io.emit('message', "A user has disconnected!");
+        const user = removeUser(socket.id);
+        if(user){
+            io.to(user.room).emit('message', generateMessage(`${user.username} has disconnected!`));
+        }
+        
     });
 });
 
